@@ -545,7 +545,7 @@ function SuperbrainPanel({ sb, price }: { sb: NonNullable<AnalysisResult['superb
         </div>
       )}
       {sb.dataSource === 'synthetic' && (
-        <p className="text-[8px] text-amber-500/70 italic">⚠ Price data unavailable — targets are score-based estimates only.</p>
+        <p className="text-[8px] text-amber-500/70 italic">⚠ Simulated data — targets are model estimates, not live market prices.</p>
       )}
 
       {/* Detected patterns */}
