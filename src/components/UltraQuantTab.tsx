@@ -600,10 +600,16 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
   const [signalFilter, setSignalFilter] = useState<SignalFilter>('ALL');
   const [enrichCache, setEnrichCache] = useState<Record<string, Partial<AnalysisResult>>>({});
   const [superbrainLoading, setSuperbrainLoading] = useState<Record<string, boolean>>({});
+  const [superbrainLastUpdated, setSuperbrainLastUpdated] = useState<Record<string, Date>>({});
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Ref-based in-flight guard — avoids stale closure issues
+  const inFlightRef = useRef<Set<string>>(new Set());
+  const expandedRef = useRef<string | null>(null);
 
-  // Fetch fresh Superbrain analysis for a symbol
-  const fetchSuperbrain = (symbol: string) => {
+  // Fetch fresh Superbrain analysis for a symbol — ref-based in-flight guard
+  const fetchSuperbrain = (symbol: string, force = false) => {
+    if (!force && inFlightRef.current.has(symbol)) return;
+    inFlightRef.current.add(symbol);
     setSuperbrainLoading(prev => ({ ...prev, [symbol]: true }));
     fetch(`${API_BASE}/api/superbrain/analyze?symbol=${symbol}`)
       .then(r => r.json())
@@ -622,14 +628,19 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
         if (data.screener?.promoterHolding != null) patch.promoterHolding = data.screener.promoterHolding;
         if (data.screener?.debtToEquity != null) patch.debtToEquity = data.screener.debtToEquity;
         setEnrichCache(prev => ({ ...prev, [symbol]: { ...(prev[symbol] ?? {}), ...patch } }));
+        setSuperbrainLastUpdated(prev => ({ ...prev, [symbol]: new Date() }));
       })
       .catch(() => {})
-      .finally(() => setSuperbrainLoading(prev => ({ ...prev, [symbol]: false })));
+      .finally(() => {
+        inFlightRef.current.delete(symbol);
+        setSuperbrainLoading(prev => ({ ...prev, [symbol]: false }));
+      });
   };
 
   const handleExpand = (symbol: string) => {
     const next = expanded === symbol ? null : symbol;
     setExpanded(next);
+    expandedRef.current = next;
 
     // Clear auto-refresh timer when closing
     if (!next) {
@@ -667,9 +678,12 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
     // Fetch fresh Superbrain immediately
     fetchSuperbrain(symbol);
 
-    // Auto-refresh Superbrain every 30s while expanded
+    // Auto-refresh Superbrain every 30s while expanded — use ref to avoid stale closure
     if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
-    refreshTimerRef.current = setInterval(() => fetchSuperbrain(symbol), 30_000);
+    refreshTimerRef.current = setInterval(() => {
+      const sym = expandedRef.current;
+      if (sym) fetchSuperbrain(sym, true); // force=true bypasses in-flight guard
+    }, 30_000);
   };
 
   // Cleanup on unmount
@@ -879,7 +893,17 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
                             <span className="text-[9px] text-violet-400 font-black uppercase tracking-widest">Fetching live data for Superbrain analysis...</span>
                           </div>
                         ) : (s as any).superbrain ? (
-                          <SuperbrainPanel sb={(s as any).superbrain} price={(s as any).currentPrice} />
+                          <>
+                            {superbrainLastUpdated[s.symbol] && (
+                              <div className="flex items-center gap-1.5">
+                                {superbrainLoading[s.symbol]
+                                  ? <><div className="w-2 h-2 rounded-full border border-violet-400 border-t-transparent animate-spin" /><span className="text-[8px] text-violet-400/70">refreshing…</span></>
+                                  : <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /><span className="text-[8px] text-zinc-500">Updated {superbrainLastUpdated[s.symbol].toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · auto-refreshes every 30s</span></>
+                                }
+                              </div>
+                            )}
+                            <SuperbrainPanel sb={(s as any).superbrain} price={(s as any).currentPrice} />
+                          </>
                         ) : null}
 
                         {/* News headlines from Google Finance */}

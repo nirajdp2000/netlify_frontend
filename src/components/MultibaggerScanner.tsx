@@ -335,9 +335,15 @@ const MultibaggerScanner: React.FC = () => {
   // Live enrichment cache: symbol → patched fields (live price + fresh Superbrain)
   const [liveCache, setLiveCache] = useState<Record<string, Partial<MultibaggerStock>>>({});
   const [liveLoading, setLiveLoading] = useState<Record<string, boolean>>({});
+  const [liveLastUpdated, setLiveLastUpdated] = useState<Record<string, Date>>({});
 
   const cache = useRef<Partial<Record<ScanCycle, MultibaggerScanResult>>>({});
   const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // useRef for in-flight tracking — avoids stale closure issues with setInterval
+  const inFlightRef = useRef<Set<string>>(new Set());
+  const liveRefreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Keep a stable ref to selectedSymbol for use inside interval callbacks
+  const selectedSymbolRef = useRef<string | null>(null);
 
   const runScan = useCallback(async (targetCycle: ScanCycle, forceRefresh = false) => {
     if (!forceRefresh && cache.current[targetCycle]) {
@@ -360,9 +366,10 @@ const MultibaggerScanner: React.FC = () => {
     }
   }, []);
 
-  // Fetch live Superbrain analysis when a stock is selected
-  const fetchLiveAnalysis = useCallback((symbol: string) => {
-    if (liveLoading[symbol]) return; // already in-flight
+  // Fetch live Superbrain analysis — uses ref-based in-flight guard to avoid stale closures
+  const fetchLiveAnalysis = useCallback((symbol: string, force = false) => {
+    if (!force && inFlightRef.current.has(symbol)) return; // already in-flight
+    inFlightRef.current.add(symbol);
     setLiveLoading(prev => ({ ...prev, [symbol]: true }));
     fetch(`${API_BASE}/api/superbrain/analyze?symbol=${symbol.replace(/^(NSE_EQ|BSE_EQ)[|:]/, '')}`)
       .then(r => r.json())
@@ -384,11 +391,15 @@ const MultibaggerScanner: React.FC = () => {
         if (data.screener?.debtToEquity != null) patch.debtToEquity = data.screener.debtToEquity;
         if (Object.keys(patch).length > 0) {
           setLiveCache(prev => ({ ...prev, [symbol]: { ...(prev[symbol] ?? {}), ...patch } }));
+          setLiveLastUpdated(prev => ({ ...prev, [symbol]: new Date() }));
         }
       })
       .catch(() => {})
-      .finally(() => setLiveLoading(prev => ({ ...prev, [symbol]: false })));
-  }, [liveLoading]);
+      .finally(() => {
+        inFlightRef.current.delete(symbol);
+        setLiveLoading(prev => ({ ...prev, [symbol]: false }));
+      });
+  }, []); // stable — no state deps, uses ref for in-flight guard
 
   useEffect(() => {
     runScan(cycle);
@@ -399,20 +410,23 @@ const MultibaggerScanner: React.FC = () => {
 
   // Auto-fetch live data when a stock is selected — and refresh every 30s
   useEffect(() => {
-    if (!selectedSymbol) return;
+    selectedSymbolRef.current = selectedSymbol;
+    if (!selectedSymbol) {
+      if (liveRefreshTimerRef.current) { clearInterval(liveRefreshTimerRef.current); liveRefreshTimerRef.current = null; }
+      return;
+    }
+    // Immediate fetch on selection
     fetchLiveAnalysis(selectedSymbol);
-    const timer = setInterval(() => {
-      // Force re-fetch by clearing cache entry for this symbol
-      setLiveCache(prev => {
-        const next = { ...prev };
-        delete next[selectedSymbol];
-        return next;
-      });
-      setLiveLoading(prev => ({ ...prev, [selectedSymbol]: false }));
-      fetchLiveAnalysis(selectedSymbol);
+    // Clear any existing timer and start fresh
+    if (liveRefreshTimerRef.current) clearInterval(liveRefreshTimerRef.current);
+    liveRefreshTimerRef.current = setInterval(() => {
+      const sym = selectedSymbolRef.current;
+      if (sym) fetchLiveAnalysis(sym, true); // force=true bypasses in-flight guard for scheduled refresh
     }, 30_000);
-    return () => clearInterval(timer);
-  }, [selectedSymbol]);
+    return () => {
+      if (liveRefreshTimerRef.current) { clearInterval(liveRefreshTimerRef.current); liveRefreshTimerRef.current = null; }
+    };
+  }, [selectedSymbol, fetchLiveAnalysis]);
 
   const preset = FORMULA_PRESETS.find((p) => p.id === activeFormula) ?? FORMULA_PRESETS[0];
   const rawStocks = result?.stocks ?? [];
@@ -785,7 +799,17 @@ const MultibaggerScanner: React.FC = () => {
                     <span className="text-[9px] text-violet-400 font-black uppercase tracking-widest">Fetching live price + OHLCV for Superbrain analysis…</span>
                   </div>
                 ) : selectedStock.superbrain ? (
-                  <SuperbrainMBPanel sb={selectedStock.superbrain} />
+                  <>
+                    {liveLastUpdated[selectedStock.symbol] && (
+                      <div className="mt-4 flex items-center gap-1.5">
+                        {liveLoading[selectedStock.symbol]
+                          ? <><div className="w-2 h-2 rounded-full border border-violet-400 border-t-transparent animate-spin" /><span className="text-[8px] text-violet-400/70">refreshing…</span></>
+                          : <><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /><span className="text-[8px] text-zinc-500">Updated {liveLastUpdated[selectedStock.symbol].toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · auto-refreshes every 30s</span></>
+                        }
+                      </div>
+                    )}
+                    <SuperbrainMBPanel sb={selectedStock.superbrain} />
+                  </>
                 ) : null}
 
                 {/* News headlines */}
