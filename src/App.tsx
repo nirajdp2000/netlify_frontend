@@ -894,7 +894,7 @@ export default function App() {
 
             {/* Upstox button */}
             <a
-              href="/upstox/connect"
+              href={`${API_BASE}/upstox/connect`}
               target="_blank"
               rel="noopener noreferrer"
               className={cn(
