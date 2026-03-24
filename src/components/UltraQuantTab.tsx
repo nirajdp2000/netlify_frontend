@@ -600,12 +600,15 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
   const [signalFilter, setSignalFilter] = useState<SignalFilter>('ALL');
   // Lazy enrichment cache: symbol → enriched fields (ROE/ROCE/PE/Promoter%)
   const [enrichCache, setEnrichCache] = useState<Record<string, Partial<AnalysisResult>>>({});
+  // Track which symbols have a fresh Superbrain analysis loading
+  const [superbrainLoading, setSuperbrainLoading] = useState<Record<string, boolean>>({});;
 
   const handleExpand = (symbol: string) => {
     const next = expanded === symbol ? null : symbol;
     setExpanded(next);
     // Fetch enrichment if not already cached and row is being opened
     if (next && !enrichCache[symbol]) {
+      // Call both endpoints in parallel: enrich for fundamentals, superbrain/analyze for live Superbrain
       fetch(`${API_BASE}/api/stock/enrich?symbol=${symbol}`)
         .then(r => r.json())
         .then(data => {
@@ -630,6 +633,24 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
           }
         })
         .catch(() => {});
+
+      // Fresh Superbrain analysis with live price + real OHLCV
+      setSuperbrainLoading(prev => ({ ...prev, [symbol]: true }));
+      fetch(`${API_BASE}/api/superbrain/analyze?symbol=${symbol}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data?.superbrain) return;
+          const patch: Partial<AnalysisResult> = { superbrain: data.superbrain };
+          if (data.livePrice != null) patch.currentPrice = data.livePrice;
+          if (data.changePct != null) patch.pChange = data.changePct;
+          if (data.weekHigh52 != null) patch.weekHigh52 = data.weekHigh52;
+          if (data.weekLow52  != null) patch.weekLow52  = data.weekLow52;
+          if (data.dataSource != null) patch.dataSource = data.dataSource;
+          if (data.dataQuality != null) patch.dataQuality = data.dataQuality;
+          setEnrichCache(prev => ({ ...prev, [symbol]: { ...(prev[symbol] ?? {}), ...patch } }));
+        })
+        .catch(() => {})
+        .finally(() => setSuperbrainLoading(prev => ({ ...prev, [symbol]: false })));
     }
   };
 
@@ -829,9 +850,14 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
                         </div>
 
                         {/* Superbrain AI Decision */}
-                        {(s as any).superbrain && (
+                        {superbrainLoading[s.symbol] && !(enrichCache[s.symbol]?.superbrain) ? (
+                          <div className="rounded-2xl border border-violet-500/20 bg-violet-500/[0.04] px-4 py-3 flex items-center gap-2">
+                            <div className="w-3 h-3 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
+                            <span className="text-[9px] text-violet-400 font-black uppercase tracking-widest">Fetching live data for Superbrain analysis...</span>
+                          </div>
+                        ) : (s as any).superbrain ? (
                           <SuperbrainPanel sb={(s as any).superbrain} price={(s as any).currentPrice} />
-                        )}
+                        ) : null}
 
                         {/* News headlines from Google Finance */}
                         {s.newsHeadlines && s.newsHeadlines.length > 0 && (
