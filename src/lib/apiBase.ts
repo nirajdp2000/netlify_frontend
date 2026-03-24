@@ -1,3 +1,2 @@
-// Base URL for all API calls — set VITE_API_URL in Netlify env vars to point to your Render backend
-// e.g. https://stockpulse-backend.onrender.com
-export const API_BASE = (import.meta.env.VITE_API_URL as string) || '';
+// Base URL for all API calls — falls back to Render backend if VITE_API_URL not set
+export const API_BASE = (import.meta.env.VITE_API_URL as string) || 'https://backend-render-qyt7.onrender.com';
