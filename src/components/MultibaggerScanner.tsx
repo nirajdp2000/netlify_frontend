@@ -11,6 +11,7 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react';
+import { API_BASE } from '../lib/apiBase';
 
 function cleanSymbol(raw: string): string {
   return raw.replace(/^(NSE_EQ|BSE_EQ)[|:]/, '');
@@ -331,6 +332,9 @@ const MultibaggerScanner: React.FC = () => {
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [activeFormula, setActiveFormula] = useState<string>('balanced');
+  // Live enrichment cache: symbol → patched fields (live price + fresh Superbrain)
+  const [liveCache, setLiveCache] = useState<Record<string, Partial<MultibaggerStock>>>({});
+  const [liveLoading, setLiveLoading] = useState<Record<string, boolean>>({});
 
   const cache = useRef<Partial<Record<ScanCycle, MultibaggerScanResult>>>({});
   const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -356,6 +360,36 @@ const MultibaggerScanner: React.FC = () => {
     }
   }, []);
 
+  // Fetch live Superbrain analysis when a stock is selected
+  const fetchLiveAnalysis = useCallback((symbol: string) => {
+    if (liveCache[symbol] || liveLoading[symbol]) return;
+    setLiveLoading(prev => ({ ...prev, [symbol]: true }));
+    fetch(`${API_BASE}/api/superbrain/analyze?symbol=${symbol.replace(/^(NSE_EQ|BSE_EQ)[|:]/, '')}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data) return;
+        const patch: Partial<MultibaggerStock> = {};
+        if (data.superbrain) patch.superbrain = data.superbrain;
+        if (data.livePrice != null) patch.currentPrice = data.livePrice;
+        if (data.changePct != null) patch.pChange = data.changePct;
+        if (data.weekHigh52 != null) patch.weekHigh52 = data.weekHigh52;
+        if (data.weekLow52  != null) patch.weekLow52  = data.weekLow52;
+        if (data.dataSource != null) patch.dataSource = data.dataSource;
+        if (data.dataQuality != null) patch.dataQuality = data.dataQuality;
+        if (data.yahoo?.pe != null) patch.pe = data.yahoo.pe;
+        if (data.yahoo?.lastPrice != null) patch.currentPrice = data.yahoo.lastPrice;
+        if (data.screener?.roe != null) patch.roe = data.screener.roe;
+        if (data.screener?.roce != null) patch.roce = data.screener.roce;
+        if (data.screener?.promoterHolding != null) patch.promoterHolding = data.screener.promoterHolding;
+        if (data.screener?.debtToEquity != null) patch.debtToEquity = data.screener.debtToEquity;
+        if (Object.keys(patch).length > 0) {
+          setLiveCache(prev => ({ ...prev, [symbol]: { ...(prev[symbol] ?? {}), ...patch } }));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLiveLoading(prev => ({ ...prev, [symbol]: false })));
+  }, [liveCache, liveLoading]);
+
   useEffect(() => {
     runScan(cycle);
     if (refreshTimer.current) clearInterval(refreshTimer.current);
@@ -363,11 +397,17 @@ const MultibaggerScanner: React.FC = () => {
     return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
   }, [cycle, runScan]);
 
+  // Auto-fetch live data for selected stock
+  useEffect(() => {
+    if (selectedSymbol) fetchLiveAnalysis(selectedSymbol);
+  }, [selectedSymbol]);
+
   const preset = FORMULA_PRESETS.find((p) => p.id === activeFormula) ?? FORMULA_PRESETS[0];
   const rawStocks = result?.stocks ?? [];
-  // Always apply formula so re-ranking is always visible (balanced uses equal-ish weights too)
   const stocks = applyFormula(rawStocks, preset.weights);
-  const selectedStock = stocks.find((s) => s.symbol === selectedSymbol) ?? stocks[0] ?? null;
+  // Merge live cache into selected stock
+  const selectedRaw = stocks.find((s) => s.symbol === selectedSymbol) ?? stocks[0] ?? null;
+  const selectedStock = selectedRaw ? { ...selectedRaw, ...(liveCache[selectedRaw.symbol] ?? {}) } as typeof selectedRaw : null;
   const sectorMap = buildSectorMap(stocks);
   const leadSector = sectorMap[0];
 
@@ -494,14 +534,55 @@ const MultibaggerScanner: React.FC = () => {
         </div>
       </section>
 
-      {/* ── Loading ── */}
+      {/* ── Loading skeleton ── */}
       {loading && (
-        <section className="rounded-[2rem] border border-violet-500/10 bg-zinc-950/70 p-6">
-          <div className="flex items-center gap-3 text-sm text-zinc-300">
-            <Activity className="h-4 w-4 animate-spin text-violet-300" />
-            Running 7-factor scoring across {result?.scannedUniverse ?? 'full'} universe · {cycle}-day cycle…
+        <div className="space-y-4 animate-pulse">
+          {/* Skeleton: selected stock panel */}
+          <section className="rounded-[2rem] border border-violet-500/10 bg-zinc-950/70 p-7">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-2 flex-1">
+                <div className="h-3 w-24 rounded-full bg-violet-500/20" />
+                <div className="h-8 w-40 rounded-xl bg-white/5" />
+                <div className="h-3 w-32 rounded-full bg-white/5" />
+              </div>
+              <div className="rounded-2xl border border-violet-500/20 bg-violet-500/10 px-5 py-4 w-32 h-24" />
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-3">
+              {Array.from({ length: 7 }).map((_, i) => (
+                <div key={i} className="space-y-2">
+                  <div className="flex justify-between">
+                    <div className="h-2.5 w-24 rounded-full bg-white/5" />
+                    <div className="h-2.5 w-8 rounded-full bg-white/5" />
+                  </div>
+                  <div className="h-1.5 w-full rounded-full bg-white/5" />
+                </div>
+              ))}
+            </div>
+          </section>
+          {/* Skeleton: rankings table */}
+          <section className="rounded-[2rem] border border-white/5 bg-zinc-950/70 overflow-hidden">
+            <div className="border-b border-white/5 px-6 py-5 flex items-center justify-between">
+              <div className="h-4 w-48 rounded-full bg-white/5" />
+              <div className="h-4 w-24 rounded-full bg-white/5" />
+            </div>
+            <div className="divide-y divide-white/5">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 px-6 py-3">
+                  <div className="h-3 w-6 rounded-full bg-white/5" />
+                  <div className="h-3 w-16 rounded-full bg-white/5" />
+                  <div className="h-3 w-24 rounded-full bg-white/5 flex-1" />
+                  <div className="h-3 w-12 rounded-full bg-white/5" />
+                  <div className="h-3 w-12 rounded-full bg-white/5" />
+                  <div className="h-3 w-12 rounded-full bg-white/5" />
+                </div>
+              ))}
+            </div>
+          </section>
+          <div className="flex items-center gap-2 px-2 text-[11px] text-violet-400/70">
+            <Activity className="h-3.5 w-3.5 animate-spin" />
+            Fetching live OHLCV + fundamentals for top 100 stocks across NSE universe…
           </div>
-        </section>
+        </div>
       )}
 
       {/* ── Main content ── */}
@@ -588,11 +669,28 @@ const MultibaggerScanner: React.FC = () => {
                       {selectedStock.bullishScore.toFixed(1)}
                     </p>
                     <p className="mt-1 text-[10px] text-zinc-500">Rank #{selectedStock.rank}</p>
-                    {selectedStock.currentPrice != null && (selectedStock as any).dataSource === 'real' && (
-                      <p className="mt-1 text-[11px] font-black text-amber-300">
-                        ₹{Number(selectedStock.currentPrice).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </p>
-                    )}
+                    {liveLoading[selectedStock.symbol] && !liveCache[selectedStock.symbol]?.currentPrice ? (
+                      <div className="mt-1 flex items-center justify-end gap-1">
+                        <div className="w-2 h-2 rounded-full border border-amber-400 border-t-transparent animate-spin" />
+                        <span className="text-[9px] text-amber-400/70">fetching live price…</span>
+                      </div>
+                    ) : selectedStock.currentPrice != null ? (
+                      <div className="mt-1">
+                        <p className="text-[13px] font-black text-amber-300">
+                          ₹{Number(selectedStock.currentPrice).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </p>
+                        {selectedStock.pChange != null && (
+                          <p className={`text-[10px] font-black ${selectedStock.pChange >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {selectedStock.pChange >= 0 ? '▲' : '▼'} {Math.abs(selectedStock.pChange).toFixed(2)}%
+                          </p>
+                        )}
+                        {(selectedStock as any).dataSource === 'real' && (
+                          <span className="inline-flex items-center gap-1 text-[8px] font-black text-emerald-400 uppercase tracking-widest">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />live
+                          </span>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -669,9 +767,14 @@ const MultibaggerScanner: React.FC = () => {
                 </div>
 
                 {/* Superbrain AI Panel */}
-                {selectedStock.superbrain && (
+                {liveLoading[selectedStock.symbol] && !liveCache[selectedStock.symbol]?.superbrain ? (
+                  <div className="mt-5 rounded-2xl border border-violet-500/20 bg-violet-950/20 px-4 py-3 flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full border-2 border-violet-400 border-t-transparent animate-spin shrink-0" />
+                    <span className="text-[9px] text-violet-400 font-black uppercase tracking-widest">Fetching live price + OHLCV for Superbrain analysis…</span>
+                  </div>
+                ) : selectedStock.superbrain ? (
                   <SuperbrainMBPanel sb={selectedStock.superbrain} />
-                )}
+                ) : null}
 
                 {/* News headlines */}
                 {selectedStock.newsHeadlines && selectedStock.newsHeadlines.length > 0 && (

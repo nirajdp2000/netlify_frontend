@@ -948,9 +948,42 @@ const UltraQuantTab = () => {
 
       {/* ── 3. Loading skeleton ── */}
       {loading && (
-        <div className="rounded-2xl border border-cyan-500/10 bg-zinc-950/70 p-8 flex items-center gap-3 text-sm text-zinc-400">
-          <Activity size={16} className="animate-spin text-cyan-300" />
-          Running ultra quant scan across the universe and model stack…
+        <div className="space-y-4 animate-pulse">
+          {/* KPI strip skeleton */}
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="rounded-2xl border border-white/5 bg-zinc-950/70 px-4 py-3">
+                <div className="h-2.5 w-16 rounded-full bg-white/5 mb-2" />
+                <div className="h-6 w-10 rounded-lg bg-white/5" />
+              </div>
+            ))}
+          </div>
+          {/* Table skeleton */}
+          <div className="rounded-2xl border border-cyan-500/10 bg-zinc-950/70 overflow-hidden">
+            <div className="border-b border-white/5 px-4 py-3 flex items-center gap-3">
+              <div className="w-3 h-3 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+              <span className="text-[11px] text-cyan-400/80 font-black uppercase tracking-widest">
+                Scanning universe · fetching live OHLCV + fundamentals…
+              </span>
+            </div>
+            <div className="divide-y divide-white/5">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 px-4 py-3" style={{ opacity: 1 - i * 0.07 }}>
+                  <div className="h-3 w-6 rounded-full bg-white/5" />
+                  <div className="h-8 w-8 rounded-xl bg-white/5" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-3 w-20 rounded-full bg-white/5" />
+                    <div className="h-2 w-14 rounded-full bg-white/[0.03]" />
+                  </div>
+                  <div className="h-3 w-12 rounded-full bg-white/5" />
+                  <div className="h-3 w-12 rounded-full bg-white/5" />
+                  <div className="h-3 w-12 rounded-full bg-white/5" />
+                  <div className="h-3 w-16 rounded-full bg-white/5" />
+                  <div className="h-6 w-20 rounded-xl bg-white/5" />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
