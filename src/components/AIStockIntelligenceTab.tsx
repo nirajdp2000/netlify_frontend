@@ -1290,6 +1290,11 @@ function PredCard({ p, rank, isBullish }: { p: PredStock; rank: number; isBullis
               <Icon size={12} className={textColor} />
               <span className="font-black text-white text-sm">{p.stock}</span>
               <span className="rounded-md px-1.5 py-0.5 text-[8px] font-black uppercase bg-white/5 text-white/40 border border-white/5">NSE</span>
+              {(p as any).dataSource === 'real' && (
+                <span className="rounded-md px-1.5 py-0.5 text-[8px] font-black uppercase bg-cyan-500/15 text-cyan-400 border border-cyan-500/20">
+                  Real
+                </span>
+              )}
               {isBreakout && (
                 <span className="rounded-md px-1.5 py-0.5 text-[8px] font-black uppercase bg-amber-500/15 text-amber-400 border border-amber-500/20">
                   Breakout
@@ -1742,6 +1747,16 @@ function NextDayPredictions() {
                   </div>
                 ))}
               </div>
+              {/* Data quality badge */}
+              {(data as any).realDataCount != null && (
+                <div className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.05] px-3 py-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
+                  <p className="text-[10px] text-cyan-300 font-bold">
+                    {(data as any).realDataCount} stocks analysed with real OHLCV candles
+                    {(data as any).syntheticDataCount > 0 && <span className="text-white/30 font-normal"> · {(data as any).syntheticDataCount} synthetic fallback</span>}
+                  </p>
+                </div>
+              )}
 
               {/* Market bias + top sectors */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
