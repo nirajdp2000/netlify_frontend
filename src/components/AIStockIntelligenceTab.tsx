@@ -1432,6 +1432,11 @@ function HistoryCard({ p }: { p: any }) {
               {isBull ? <TrendingUp size={8} /> : <TrendingDown size={8} />}
               {p.prediction}
             </span>
+            {(p.dataSource === 'real' || p.signals?.dataSource === 'real') && (
+              <span className="rounded-md px-1.5 py-0.5 text-[8px] font-black uppercase bg-cyan-500/15 text-cyan-400 border border-cyan-500/20">
+                Real
+              </span>
+            )}
             {sector !== '—' && (
               <span className="rounded-md px-1.5 py-0.5 text-[8px] font-bold bg-white/5 border border-white/5 text-white/40 uppercase tracking-[0.08em]">
                 {sector}
