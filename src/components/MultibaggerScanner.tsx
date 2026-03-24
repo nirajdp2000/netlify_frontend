@@ -362,7 +362,7 @@ const MultibaggerScanner: React.FC = () => {
 
   // Fetch live Superbrain analysis when a stock is selected
   const fetchLiveAnalysis = useCallback((symbol: string) => {
-    if (liveCache[symbol] || liveLoading[symbol]) return;
+    if (liveLoading[symbol]) return; // already in-flight
     setLiveLoading(prev => ({ ...prev, [symbol]: true }));
     fetch(`${API_BASE}/api/superbrain/analyze?symbol=${symbol.replace(/^(NSE_EQ|BSE_EQ)[|:]/, '')}`)
       .then(r => r.json())
@@ -388,7 +388,7 @@ const MultibaggerScanner: React.FC = () => {
       })
       .catch(() => {})
       .finally(() => setLiveLoading(prev => ({ ...prev, [symbol]: false })));
-  }, [liveCache, liveLoading]);
+  }, [liveLoading]);
 
   useEffect(() => {
     runScan(cycle);
@@ -397,9 +397,21 @@ const MultibaggerScanner: React.FC = () => {
     return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
   }, [cycle, runScan]);
 
-  // Auto-fetch live data for selected stock
+  // Auto-fetch live data when a stock is selected — and refresh every 30s
   useEffect(() => {
-    if (selectedSymbol) fetchLiveAnalysis(selectedSymbol);
+    if (!selectedSymbol) return;
+    fetchLiveAnalysis(selectedSymbol);
+    const timer = setInterval(() => {
+      // Force re-fetch by clearing cache entry for this symbol
+      setLiveCache(prev => {
+        const next = { ...prev };
+        delete next[selectedSymbol];
+        return next;
+      });
+      setLiveLoading(prev => ({ ...prev, [selectedSymbol]: false }));
+      fetchLiveAnalysis(selectedSymbol);
+    }, 30_000);
+    return () => clearInterval(timer);
   }, [selectedSymbol]);
 
   const preset = FORMULA_PRESETS.find((p) => p.id === activeFormula) ?? FORMULA_PRESETS[0];

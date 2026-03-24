@@ -598,17 +598,47 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
   const [sortDir, setSortDir] = useState<'desc' | 'asc'>('desc');
   const [search, setSearch] = useState('');
   const [signalFilter, setSignalFilter] = useState<SignalFilter>('ALL');
-  // Lazy enrichment cache: symbol → enriched fields (ROE/ROCE/PE/Promoter%)
   const [enrichCache, setEnrichCache] = useState<Record<string, Partial<AnalysisResult>>>({});
-  // Track which symbols have a fresh Superbrain analysis loading
-  const [superbrainLoading, setSuperbrainLoading] = useState<Record<string, boolean>>({});;
+  const [superbrainLoading, setSuperbrainLoading] = useState<Record<string, boolean>>({});
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Fetch fresh Superbrain analysis for a symbol
+  const fetchSuperbrain = (symbol: string) => {
+    setSuperbrainLoading(prev => ({ ...prev, [symbol]: true }));
+    fetch(`${API_BASE}/api/superbrain/analyze?symbol=${symbol}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data?.superbrain) return;
+        const patch: Partial<AnalysisResult> = { superbrain: data.superbrain };
+        if (data.livePrice != null) patch.currentPrice = data.livePrice;
+        if (data.changePct != null) patch.pChange = data.changePct;
+        if (data.weekHigh52 != null) patch.weekHigh52 = data.weekHigh52;
+        if (data.weekLow52  != null) patch.weekLow52  = data.weekLow52;
+        if (data.dataSource != null) patch.dataSource = data.dataSource;
+        if (data.dataQuality != null) patch.dataQuality = data.dataQuality;
+        if (data.yahoo?.pe != null) patch.pe = data.yahoo.pe;
+        if (data.screener?.roe != null) patch.roe = data.screener.roe;
+        if (data.screener?.roce != null) patch.roce = data.screener.roce;
+        if (data.screener?.promoterHolding != null) patch.promoterHolding = data.screener.promoterHolding;
+        if (data.screener?.debtToEquity != null) patch.debtToEquity = data.screener.debtToEquity;
+        setEnrichCache(prev => ({ ...prev, [symbol]: { ...(prev[symbol] ?? {}), ...patch } }));
+      })
+      .catch(() => {})
+      .finally(() => setSuperbrainLoading(prev => ({ ...prev, [symbol]: false })));
+  };
 
   const handleExpand = (symbol: string) => {
     const next = expanded === symbol ? null : symbol;
     setExpanded(next);
-    // Fetch enrichment if not already cached and row is being opened
-    if (next && !enrichCache[symbol]) {
-      // Call both endpoints in parallel: enrich for fundamentals, superbrain/analyze for live Superbrain
+
+    // Clear auto-refresh timer when closing
+    if (!next) {
+      if (refreshTimerRef.current) { clearInterval(refreshTimerRef.current); refreshTimerRef.current = null; }
+      return;
+    }
+
+    // Fetch enrichment (fundamentals) if not cached
+    if (!enrichCache[symbol]) {
       fetch(`${API_BASE}/api/stock/enrich?symbol=${symbol}`)
         .then(r => r.json())
         .then(data => {
@@ -624,7 +654,6 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
           if (data.screener?.pe      != null && data.yahoo?.pe == null) patch.pe = data.screener.pe;
           if (data.screener?.debtToEquity    != null) patch.debtToEquity    = data.screener.debtToEquity;
           if (data.screener?.promoterHolding != null) patch.promoterHolding = data.screener.promoterHolding;
-          // Update dataSource/dataQuality based on what we got
           if (data.yahoo?.lastPrice != null) patch.dataSource = 'real';
           if (data.screener?.roe != null || data.screener?.roce != null) patch.dataQuality = 'HIGH';
           else if (data.yahoo?.lastPrice != null) patch.dataQuality = 'MEDIUM';
@@ -633,26 +662,20 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
           }
         })
         .catch(() => {});
-
-      // Fresh Superbrain analysis with live price + real OHLCV
-      setSuperbrainLoading(prev => ({ ...prev, [symbol]: true }));
-      fetch(`${API_BASE}/api/superbrain/analyze?symbol=${symbol}`)
-        .then(r => r.json())
-        .then(data => {
-          if (!data?.superbrain) return;
-          const patch: Partial<AnalysisResult> = { superbrain: data.superbrain };
-          if (data.livePrice != null) patch.currentPrice = data.livePrice;
-          if (data.changePct != null) patch.pChange = data.changePct;
-          if (data.weekHigh52 != null) patch.weekHigh52 = data.weekHigh52;
-          if (data.weekLow52  != null) patch.weekLow52  = data.weekLow52;
-          if (data.dataSource != null) patch.dataSource = data.dataSource;
-          if (data.dataQuality != null) patch.dataQuality = data.dataQuality;
-          setEnrichCache(prev => ({ ...prev, [symbol]: { ...(prev[symbol] ?? {}), ...patch } }));
-        })
-        .catch(() => {})
-        .finally(() => setSuperbrainLoading(prev => ({ ...prev, [symbol]: false })));
     }
+
+    // Fetch fresh Superbrain immediately
+    fetchSuperbrain(symbol);
+
+    // Auto-refresh Superbrain every 30s while expanded
+    if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+    refreshTimerRef.current = setInterval(() => fetchSuperbrain(symbol), 30_000);
   };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { if (refreshTimerRef.current) clearInterval(refreshTimerRef.current); };
+  }, []);
 
   const filtered = [...results]
     .filter(r => {
