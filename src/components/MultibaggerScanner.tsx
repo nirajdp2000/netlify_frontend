@@ -781,12 +781,6 @@ const MultibaggerScanner: React.FC = () => {
                     <BarChart3 className="h-3 w-3" />
                     Volume: {selectedStock.volumeSignal}
                   </span>
-                  {selectedStock.sentimentTag && (
-                    <span className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-400/20 bg-indigo-400/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.18em] text-indigo-300">
-                      <Zap className="h-3 w-3" />
-                      {selectedStock.sentimentTag}
-                    </span>
-                  )}
                   <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-600">
                     Vol Ratio {selectedStock.volRatio.toFixed(2)}x
                   </span>

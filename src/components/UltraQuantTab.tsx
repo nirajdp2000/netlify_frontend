@@ -773,7 +773,6 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
               ))}
               <th className="px-3 py-3">Price</th>
               <th className="px-3 py-3">Regime</th>
-              <th className="px-3 py-3" title="Superbrain AI decision — fuses technical, fundamental, sentiment, macro and momentum signals">Signal ✦</th>
               <th className="px-3 py-3 w-8"></th>
             </tr>
           </thead>
@@ -831,7 +830,7 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
                       : <span className="text-[10px] text-zinc-600" title="Price unavailable — stock not found on Yahoo Finance">—</span>
                     }
                   </td>
-                  <td className="px-3 py-3"><SignalPill action={(stock as any).superbrain?.decision ?? stock.rlAction} /></td>                  <td className="px-3 py-3 text-zinc-600">
+                  <td className="px-3 py-3 text-zinc-600">
                     {expanded === stock.symbol ? <ChevronUp size={12} /> : <ChevronRight size={12} />}
                   </td>
                 </tr>
@@ -840,7 +839,7 @@ function StockTable({ results }: { results: AnalysisResult[] }) {
                   const s = stock;
                   return (
                   <tr className="bg-cyan-500/[0.03] border-b border-cyan-500/10">
-                    <td colSpan={11} className="px-4 py-4">
+                    <td colSpan={10} className="px-4 py-4">
                       <div className="space-y-3">
                         {/* Source badge */}
                         <div className="flex items-center gap-2 flex-wrap">
