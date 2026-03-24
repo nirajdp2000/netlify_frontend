@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE } from './lib/apiBase';
 import { 
   LineChart, 
@@ -186,9 +186,9 @@ export default function App() {
   const livePricePrevRef = useRef<number | null>(null);
   const [livePriceFlash, setLivePriceFlash] = useState<'up' | 'down' | null>(null);
   const livePriceSourceRef = useRef<'upstox' | 'no_auth' | 'error' | null>(null);
-  // lastCandleClose: fallback display only � clearly labeled as historical, never as live
+  // lastCandleClose: fallback display only - clearly labeled as historical, never as live
   const [lastCandleClose, setLastCandleClose] = useState<number | null>(null);
-  // Live chart data � mirrors `data` but last candle close is updated in real-time
+  // Live chart data - mirrors `data` but last candle close is updated in real-time
   const [liveChartData, setLiveChartData] = useState<CandleData[]>([]);
   const liveIntervalRef = useRef<string>('1minute');
   const liveCandleRef = useRef<CandleData | null>(null);
@@ -203,8 +203,8 @@ export default function App() {
 
   // Market ticker items (indices + top movers)
   const [tickerItems, setTickerItems] = useState<Array<{ s: string; v: string; c: string }>>([
-    { s: 'NIFTY 50', v: '�', c: '�' },
-    { s: 'BANK NIFTY', v: '�', c: '�' },
+    { s: 'NIFTY 50', v: '--', c: '--' },
+    { s: 'BANK NIFTY', v: '--', c: '--' },
   ]);
 
   // Watchlist
@@ -255,7 +255,7 @@ export default function App() {
     window.localStorage.setItem('stockpulse-desk-theme', deskTheme);
   }, [deskTheme]);
 
-  // Market Dynamics � poll sectors, sentiment, momentum every 5s
+  // Market Dynamics - poll sectors, sentiment, momentum every 5s
   useEffect(() => {
     const fetchMD = async () => {
       try {
@@ -276,14 +276,14 @@ export default function App() {
         // Build ticker: indices first, then top movers
         const movers = momentumArr.slice(0, 4).map((m: any) => ({
           s: m.symbol,
-          v: m.lastPrice ? m.lastPrice.toFixed(2) : '�',
+          v: m.lastPrice ? m.lastPrice.toFixed(2) : '--',
           c: m.priceChange !== undefined
             ? (parseFloat(m.priceChange) >= 0 ? '+' : '') + parseFloat(m.priceChange).toFixed(2) + '%'
-            : '�',
+            : '--',
         }));
         const idxItems = Array.isArray(indices) ? indices : [];
         setTickerItems([...idxItems, ...movers]);
-      } catch { /* silent � show stale data */ }
+      } catch { /* silent - show stale data */ }
     };
     fetchMD();
     const id = window.setInterval(fetchMD, 5000);
@@ -314,7 +314,7 @@ export default function App() {
     return () => window.clearInterval(intervalId);
   }, [selectedStock]);
 
-  // SSE live stream � connects when a stock is selected, streams ticks every 1s
+  // SSE live stream - connects when a stock is selected, streams ticks every 1s
   useEffect(() => {
     // Close any existing SSE connection
     if (sseRef.current) {
@@ -360,7 +360,7 @@ export default function App() {
           }
           livePricePrevRef.current = ltp;
 
-          // Update hero panel � ONLY real Upstox LTP sets livePrice
+          // Update hero panel - ONLY real Upstox LTP sets livePrice
           setLivePrice(ltp);
           setLivePriceChange(msg.change ?? null);
           setLivePriceChangePercent(msg.changePercent ?? null);
@@ -420,13 +420,13 @@ export default function App() {
           console.debug('[SSE] LTP:', ltp, '| bucket:', bucketLabel, '| time:', nowStr);
 
         } else if (msg.type === 'no_auth') {
-          // Upstox not connected � livePrice stays null, show warning state
+          // Upstox not connected - livePrice stays null, show warning state
           setLivePrice(null);
           livePriceSourceRef.current = 'no_auth';
           setLivePriceSource('no_auth');
           setLivePriceUpdated(nowStr);
           setStreamErrorMsg(msg.message ?? 'Upstox not authenticated');
-          console.debug('[SSE] no_auth � Upstox not connected');
+          console.debug('[SSE] no_auth - Upstox not connected');
 
         } else if (msg.type === 'error') {
           livePriceSourceRef.current = 'error';
@@ -436,19 +436,19 @@ export default function App() {
           console.warn('[SSE] error:', msg.code, msg.message);
         }
       } catch {
-        // malformed event � ignore
+        // malformed event - ignore
       }
     };
 
     sse.onerror = () => {
-      // SSE onerror fires on reconnect attempts � this is normal EventSource behavior.
+      // SSE onerror fires on reconnect attempts - this is normal EventSource behavior.
       // The browser will auto-reconnect. Use ref (not state) to avoid stale closure.
       if (livePriceSourceRef.current === null) {
         livePriceSourceRef.current = 'error';
         setLivePriceSource('error');
         setStreamErrorMsg('Stream connecting...');
       }
-      console.debug('[SSE] onerror fired � browser will auto-reconnect');
+      console.debug('[SSE] onerror fired - browser will auto-reconnect');
     };
 
     return () => {
@@ -564,7 +564,7 @@ export default function App() {
       setLiveChartData(formattedData);
       liveCandleRef.current = null; // reset live candle on new data load
 
-      // Store last candle close for fallback display ONLY � never used as live price
+      // Store last candle close for fallback display ONLY - never used as live price
       if (formattedData.length > 0) {
         setLastCandleClose(formattedData[formattedData.length - 1].close);
         console.debug('[Historical] Last candle close:', formattedData[formattedData.length - 1].close,
@@ -582,7 +582,7 @@ export default function App() {
     }
   };
 
-  // Load more historical data � prepends older candles to existing data
+  // Load more historical data - prepends older candles to existing data
   const [loadingMore, setLoadingMore] = useState(false);
   const loadMoreHistory = async () => {
     if (!selectedStock || loadingMore || data.length === 0) return;
@@ -800,9 +800,9 @@ export default function App() {
                 "font-bold tabular-nums",
                 item.c.startsWith('+') ? "text-emerald-400" : item.c.startsWith('-') ? "text-rose-400" : "text-zinc-500"
               )}>
-                {item.c.startsWith('+') ? '?' : item.c.startsWith('-') ? '?' : ''} {item.c}
+                {item.c.startsWith('+') ? '▲' : item.c.startsWith('-') ? '▼' : ''} {item.c}
               </span>
-              <span className="text-white/10">�</span>
+              <span className="text-white/10">·</span>
             </div>
           ))}
         </div>
@@ -840,12 +840,12 @@ export default function App() {
           {/* -- Desktop Tabs -- */}
           <nav className="hidden md:flex items-center gap-1 flex-1">
             {[
-              { id: 'analytics',      label: 'Analytics',       icon: '??', badge: null,  badgeStyle: '' },
-              { id: 'institutional',  label: 'Institutional',   icon: '??', badge: 'PRO', badgeStyle: 'bg-violet-500/90 text-white' },
-              { id: 'ultraQuant',     label: 'Ultra Quant',     icon: '?', badge: 'AI',  badgeStyle: 'bg-cyan-400 text-slate-950' },
-              { id: 'multibagger',    label: 'Multibagger',     icon: '??', badge: 'NEW', badgeStyle: 'bg-amber-400 text-slate-950' },
-              { id: 'aiIntelligence', label: 'AI Intelligence', icon: '??', badge: 'AI',  badgeStyle: 'bg-gradient-to-r from-violet-500 to-cyan-500 text-white' },
-            ].map(({ id, label, icon, badge, badgeStyle }) => {
+              { id: 'analytics',      label: 'Analytics',       Icon: BarChart3,  badge: null,  badgeStyle: '' },
+              { id: 'institutional',  label: 'Institutional',   Icon: Shield,     badge: 'PRO', badgeStyle: 'bg-violet-500/90 text-white' },
+              { id: 'ultraQuant',     label: 'Ultra Quant',     Icon: Zap,        badge: 'AI',  badgeStyle: 'bg-cyan-400 text-slate-950' },
+              { id: 'multibagger',    label: 'Multibagger',     Icon: TrendingUp, badge: 'NEW', badgeStyle: 'bg-amber-400 text-slate-950' },
+              { id: 'aiIntelligence', label: 'AI Intelligence', Icon: Brain,      badge: 'AI',  badgeStyle: 'bg-gradient-to-r from-violet-500 to-cyan-500 text-white' },
+            ].map(({ id, label, Icon, badge, badgeStyle }) => {
               const isActive = activeTab === id;
               return (
                 <button
@@ -859,8 +859,8 @@ export default function App() {
                   )}
                 >
                   {/* icon */}
-                  <span className={cn("text-sm transition-transform duration-200", isActive ? "scale-110" : "group-hover:scale-105")}>
-                    {icon}
+                  <span className={cn("transition-transform duration-200", isActive ? "scale-110" : "group-hover:scale-105")}>
+                    <Icon className="w-3.5 h-3.5" />
                   </span>
                   {label}
                   {badge && (
@@ -941,12 +941,12 @@ export default function App() {
         {/* -- Mobile Tabs -- */}
         <div className="md:hidden flex overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] items-center gap-0.5 px-3 border-t border-white/[0.05] bg-black/30">
           {[
-            { id: 'analytics',      label: 'Analytics',       icon: '??', badge: null,  badgeStyle: '' },
-            { id: 'institutional',  label: 'Institutional',   icon: '??', badge: 'PRO', badgeStyle: 'bg-violet-500 text-white' },
-            { id: 'ultraQuant',     label: 'Ultra Quant',     icon: '?', badge: 'AI',  badgeStyle: 'bg-cyan-400 text-slate-950' },
-            { id: 'multibagger',    label: 'Multibagger',     icon: '??', badge: 'NEW', badgeStyle: 'bg-amber-400 text-slate-950' },
-            { id: 'aiIntelligence', label: 'AI',              icon: '??', badge: 'AI',  badgeStyle: 'bg-gradient-to-r from-violet-500 to-cyan-500 text-white' },
-          ].map(({ id, label, icon, badge, badgeStyle }) => (
+            { id: 'analytics',      label: 'Analytics',       Icon: BarChart3,  badge: null,  badgeStyle: '' },
+            { id: 'institutional',  label: 'Institutional',   Icon: Shield,     badge: 'PRO', badgeStyle: 'bg-violet-500 text-white' },
+            { id: 'ultraQuant',     label: 'Ultra Quant',     Icon: Zap,        badge: 'AI',  badgeStyle: 'bg-cyan-400 text-slate-950' },
+            { id: 'multibagger',    label: 'Multibagger',     Icon: TrendingUp, badge: 'NEW', badgeStyle: 'bg-amber-400 text-slate-950' },
+            { id: 'aiIntelligence', label: 'AI',              Icon: Brain,      badge: 'AI',  badgeStyle: 'bg-gradient-to-r from-violet-500 to-cyan-500 text-white' },
+          ].map(({ id, label, Icon, badge, badgeStyle }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id as any)}
@@ -955,7 +955,7 @@ export default function App() {
                 activeTab === id ? "text-white border-indigo-400" : "text-zinc-500 border-transparent hover:text-zinc-300"
               )}
             >
-              <span className="text-xs">{icon}</span>
+              <Icon className="w-3 h-3" />
               {label}
               {badge && (
                 <span className={cn("text-[7px] font-black px-1 py-0.5 rounded leading-none", badgeStyle)}>
