@@ -47,9 +47,14 @@ type AnalysisResult = {
   superbrain?: {
     decision: string; confidence: number; superScore: number; riskScore: number;
     targetPrice: number | null; stopLoss: number | null; upside: number | null;
+    positionSizePct: number | null;
     explanation: string[]; catalysts: string[]; risks: string[]; regime: string;
     holdingPeriod: string;
-    signals: { technical: number; fundamental: number; sentiment: number; macro: number; momentum: number };
+    signals: { technical: number; fundamental: number; sentiment: number; macro: number; momentum: number; pattern: number; feedback: number };
+    patterns: string[];
+    sectorStrength: number;
+    winProbability: number;
+    dataSource?: 'real' | 'synthetic';
   };
 };
 
@@ -440,6 +445,16 @@ function AlertsPanel({ alerts }: { alerts: UltraQuantDashboard['alerts'] }) {
 
 // ─── Superbrain Panel ─────────────────────────────────────────────────────────
 
+const SIGNAL_COLORS: Record<string, string> = {
+  technical:   'bg-cyan-400/70',
+  fundamental: 'bg-emerald-400/70',
+  sentiment:   'bg-amber-400/70',
+  macro:       'bg-indigo-400/70',
+  momentum:    'bg-violet-400/70',
+  pattern:     'bg-pink-400/70',
+  feedback:    'bg-teal-400/70',
+};
+
 function SuperbrainPanel({ sb, price }: { sb: NonNullable<AnalysisResult['superbrain']>; price?: number | null }) {
   const decisionColor =
     sb.decision === 'STRONG_BUY' ? 'text-emerald-300 border-emerald-400/30 bg-emerald-500/10' :
@@ -452,39 +467,44 @@ function SuperbrainPanel({ sb, price }: { sb: NonNullable<AnalysisResult['superb
     sb.regime === 'BEAR'     ? 'text-rose-400' :
     sb.regime === 'VOLATILE' ? 'text-amber-400' : 'text-zinc-400';
 
+  const winPct = sb.winProbability ?? 0;
+  const winColor = winPct >= 65 ? 'text-emerald-400' : winPct >= 50 ? 'text-amber-400' : 'text-rose-400';
+  const sectorStr = sb.sectorStrength ?? 0;
+
   return (
     <div className="rounded-xl border border-violet-500/20 bg-violet-950/20 p-3 space-y-2.5">
+      {/* Header row */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[8px] font-black uppercase tracking-[0.2em] text-violet-400 flex items-center gap-1">
-          <Cpu size={9} /> Superbrain AI
+          <Cpu size={9} /> Superbrain v2
         </span>
         <span className={`text-[9px] font-black px-2 py-0.5 rounded-lg border ${decisionColor}`}>
           {sb.decision.replace('_', ' ')}
         </span>
         <span className="text-[9px] text-zinc-400">
-          Confidence <span className="font-black text-white">{sb.confidence.toFixed(0)}%</span>
+          Conf <span className="font-black text-white">{sb.confidence.toFixed(0)}%</span>
         </span>
         <span className={`text-[9px] font-bold ${regimeColor}`}>{sb.regime}</span>
         <span className="text-[9px] text-zinc-500">{sb.holdingPeriod}</span>
       </div>
 
-      {/* Signal bars */}
-      <div className="grid grid-cols-5 gap-1.5">
+      {/* Signal bars — 7 layers */}
+      <div className="grid grid-cols-7 gap-1">
         {Object.entries(sb.signals).map(([key, val]) => (
           <div key={key} className="space-y-0.5">
             <div className="flex justify-between">
-              <span className="text-[7px] uppercase tracking-[0.1em] text-zinc-500">{key.slice(0,4)}</span>
-              <span className="text-[7px] font-black text-zinc-300">{(val as number).toFixed(0)}</span>
+              <span className="text-[6px] uppercase tracking-[0.08em] text-zinc-500">{key.slice(0,4)}</span>
+              <span className="text-[6px] font-black text-zinc-300">{(val as number).toFixed(0)}</span>
             </div>
             <div className="h-1 rounded-full bg-white/5 overflow-hidden">
-              <div className="h-full rounded-full bg-violet-400/70 transition-all" style={{ width: `${val}%` }} />
+              <div className={`h-full rounded-full transition-all ${SIGNAL_COLORS[key] ?? 'bg-violet-400/70'}`} style={{ width: `${val}%` }} />
             </div>
           </div>
         ))}
       </div>
 
-      {/* Score + targets */}
-      <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+      {/* Stats row: score, risk, win prob, kelly, sector strength */}
+      <div className="grid grid-cols-5 gap-1.5 text-[10px]">
         <div className="rounded-lg bg-white/[0.03] border border-white/5 px-2 py-1.5">
           <p className="text-[7px] text-zinc-500 uppercase tracking-[0.1em]">Super Score</p>
           <p className="font-black text-violet-300">{sb.superScore.toFixed(1)}</p>
@@ -493,21 +513,49 @@ function SuperbrainPanel({ sb, price }: { sb: NonNullable<AnalysisResult['superb
           <p className="text-[7px] text-zinc-500 uppercase tracking-[0.1em]">Risk</p>
           <p className={`font-black ${sb.riskScore >= 60 ? 'text-rose-400' : sb.riskScore >= 40 ? 'text-amber-400' : 'text-emerald-400'}`}>{sb.riskScore.toFixed(0)}</p>
         </div>
-        {sb.targetPrice && (
-          <div className="rounded-lg bg-emerald-500/[0.05] border border-emerald-500/15 px-2 py-1.5">
-            <p className="text-[7px] text-zinc-500 uppercase tracking-[0.1em]">Target {sb.dataSource === 'synthetic' ? '~' : ''}</p>
-            <p className="font-black text-emerald-400">₹{sb.targetPrice.toLocaleString('en-IN')}</p>
-          </div>
-        )}
-        {sb.stopLoss && (
-          <div className="rounded-lg bg-rose-500/[0.05] border border-rose-500/15 px-2 py-1.5">
-            <p className="text-[7px] text-zinc-500 uppercase tracking-[0.1em]">Stop Loss {sb.dataSource === 'synthetic' ? '~' : ''}</p>
-            <p className="font-black text-rose-400">₹{sb.stopLoss.toLocaleString('en-IN')}</p>
-          </div>
-        )}
+        <div className="rounded-lg bg-white/[0.03] border border-white/5 px-2 py-1.5">
+          <p className="text-[7px] text-zinc-500 uppercase tracking-[0.1em]">Win Prob</p>
+          <p className={`font-black ${winColor}`}>{winPct.toFixed(0)}%</p>
+        </div>
+        <div className="rounded-lg bg-white/[0.03] border border-white/5 px-2 py-1.5">
+          <p className="text-[7px] text-zinc-500 uppercase tracking-[0.1em]">Kelly %</p>
+          <p className="font-black text-cyan-300">{sb.positionSizePct != null ? `${sb.positionSizePct.toFixed(1)}%` : '—'}</p>
+        </div>
+        <div className="rounded-lg bg-white/[0.03] border border-white/5 px-2 py-1.5">
+          <p className="text-[7px] text-zinc-500 uppercase tracking-[0.1em]">Sector Str</p>
+          <p className={`font-black ${sectorStr >= 65 ? 'text-emerald-400' : sectorStr >= 45 ? 'text-amber-400' : 'text-zinc-400'}`}>{sectorStr.toFixed(0)}</p>
+        </div>
       </div>
+
+      {/* Targets row */}
+      {(sb.targetPrice || sb.stopLoss) && (
+        <div className="grid grid-cols-2 gap-1.5">
+          {sb.targetPrice && (
+            <div className="rounded-lg bg-emerald-500/[0.05] border border-emerald-500/15 px-2 py-1.5">
+              <p className="text-[7px] text-zinc-500 uppercase tracking-[0.1em]">Target {sb.dataSource === 'synthetic' ? '~' : ''}</p>
+              <p className="font-black text-emerald-400 text-[10px]">₹{sb.targetPrice.toLocaleString('en-IN')}</p>
+            </div>
+          )}
+          {sb.stopLoss && (
+            <div className="rounded-lg bg-rose-500/[0.05] border border-rose-500/15 px-2 py-1.5">
+              <p className="text-[7px] text-zinc-500 uppercase tracking-[0.1em]">Stop Loss {sb.dataSource === 'synthetic' ? '~' : ''}</p>
+              <p className="font-black text-rose-400 text-[10px]">₹{sb.stopLoss.toLocaleString('en-IN')}</p>
+            </div>
+          )}
+        </div>
+      )}
       {sb.dataSource === 'synthetic' && (
-        <p className="text-[8px] text-amber-500/70 italic">⚠ Price data unavailable from market — targets are score-based estimates only, not real market prices.</p>
+        <p className="text-[8px] text-amber-500/70 italic">⚠ Price data unavailable — targets are score-based estimates only.</p>
+      )}
+
+      {/* Detected patterns */}
+      {sb.patterns && sb.patterns.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          <span className="text-[7px] font-black uppercase tracking-[0.1em] text-pink-400 self-center">Patterns:</span>
+          {sb.patterns.map((p, i) => (
+            <span key={i} className="rounded-full bg-pink-500/10 border border-pink-500/20 px-1.5 py-0.5 text-[7px] font-black text-pink-300">{p}</span>
+          ))}
+        </div>
       )}
 
       {/* Explanation */}
