@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { API_BASE } from '../lib/apiBase';
 import { fetchJson } from '../lib/api';
 import {
   Activity, AlertTriangle, BarChart2, Brain, ChevronUp, ChevronDown,
@@ -62,6 +61,9 @@ interface StockIntelligenceResult {
   orbSignal?: 'EARLY_RALLY' | 'WATCH' | 'NONE';
   dataSource?: 'live' | 'synthetic';
   priceSource?: 'live' | 'synthetic';
+  scoreSource?: 'real' | 'synthetic';
+  isActionable?: boolean;
+  marketClosedWatchlist?: boolean;
 }
 
 interface NewsItem {
@@ -127,6 +129,8 @@ interface Dashboard {
   aiPowered?: boolean;
   aiInsights?: string;
   marketSummary?: string;
+  marketDay?: boolean;
+  marketOpen?: boolean;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -473,6 +477,13 @@ function RankingsTable({ data }: { data: StockIntelligenceResult[] }) {
                       {row.earlyRallySignal && <Zap size={9} className="text-amber-400 shrink-0" />}
                       {row.institutionalSignal && <Shield size={9} className="text-violet-400 shrink-0" />}
                       <span className="font-black text-white">{row.symbol}</span>
+                      <span className={`text-[7px] font-black rounded px-1 py-0.5 leading-none ${
+                        row.scoreSource === 'real'
+                          ? 'text-cyan-300 bg-cyan-500/10'
+                          : 'text-amber-300/70 bg-amber-500/10'
+                      }`}>
+                        {row.scoreSource === 'real' ? 'REAL SCORE' : 'SIM SCORE'}
+                      </span>
                       <span className="text-white/25 text-[9px] hidden sm:inline">{row.sector}</span>
                     </div>
                   </td>
@@ -653,13 +664,13 @@ function EarlyRallyPanel({ candidates, marketDay }: { candidates: StockIntellige
       {isWatchlistMode && (
         <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 flex items-center gap-2">
           <MoonStar size={12} className="text-amber-400 shrink-0" />
-          <p className="text-[10px] text-amber-300/80">Market closed — showing top watchlist candidates by AI score. Rally scores are AI-computed and valid. Live ORB/VWAP signals resume on next trading day.</p>
+          <p className="text-[10px] text-amber-300/80">Market closed — showing watchlist candidates by model score. Live ORB/VWAP signals resume on next trading day.</p>
         </div>
       )}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {candidates.map(c => {
         const isLive = c.dataSource === 'live';
-        const isWatchlist = (c as any).marketClosedWatchlist;
+        const isWatchlist = c.marketClosedWatchlist;
         return (
           <div key={c.symbol} className={`group rounded-2xl border p-4 space-y-3 transition-all hover:border-amber-500/40 ${
             isLive ? 'border-amber-500/30 bg-gradient-to-br from-amber-500/8 to-transparent'
@@ -1187,11 +1198,19 @@ interface PredStock {
   stock: string; sector: string; prediction: 'Bullish' | 'Bearish';
   confidence: number; signals: PredSignals; explanation: string;
   predicted_price: number; current_price: number;
+  dataSource?: 'real' | 'synthetic';
   indicators: { rsi: number; atr: number; volumeRatio: number; ema20: number; ema50: number; bollinger: number; sentiment: number; stochastic: number; acceleration: number };
 }
 interface PredData {
   bullish: PredStock[]; bearish: PredStock[];
   totalScanned: number; bullishCount: number; bearishCount: number; generatedAt: string;
+  computing?: boolean;
+  message?: string;
+  marketDay?: boolean;
+  marketOpen?: boolean;
+  lastTradingDay?: string;
+  realDataCount?: number;
+  syntheticDataCount?: number;
 }
 interface HistoryData {
   date: string; bullish: any[]; bearish: any[]; total: number;
@@ -1290,7 +1309,7 @@ function PredCard({ p, rank, isBullish }: { p: PredStock; rank: number; isBullis
               <Icon size={12} className={textColor} />
               <span className="font-black text-white text-sm">{p.stock}</span>
               <span className="rounded-md px-1.5 py-0.5 text-[8px] font-black uppercase bg-white/5 text-white/40 border border-white/5">NSE</span>
-              {(p as any).dataSource === 'real' && (
+              {p.dataSource === 'real' && (
                 <span className="rounded-md px-1.5 py-0.5 text-[8px] font-black uppercase bg-cyan-500/15 text-cyan-400 border border-cyan-500/20">
                   Real
                 </span>
@@ -1577,19 +1596,23 @@ function NextDayPredictions() {
   const [filterType, setFilterType] = useState<'All' | 'Bullish' | 'Bearish'>('All');
   const [minConf, setMinConf] = useState(60);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadPredictions = async (refresh = false) => {
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
     setLoading(true);
     setError(null);
     try {
-      const url = `${API_BASE}/api/predictions/run${refresh ? '?refresh=true' : ''}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const url = `/api/predictions/run${refresh ? '?refresh=true' : ''}`;
+      const json = await fetchJson<PredData>(url);
       setData(json);
       // If still computing, auto-poll every 5s
       if (json.computing) {
-        setTimeout(() => loadPredictions(false), 5000);
+        if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = setTimeout(() => loadPredictions(false), 5000);
       }
     } catch (e: any) {
       setError(e.message);
@@ -1601,14 +1624,17 @@ function NextDayPredictions() {
   const loadHistory = async (date: string) => {
     if (!date) return;
     setHistLoading(true);
+    setError(null);
     try {
-      const [histRes, cmpRes] = await Promise.all([
-        fetch(`${API_BASE}/api/predictions/history/${date}`),
-        fetch(`${API_BASE}/api/predictions/compare/${date}`),
+      const [hist, cmp] = await Promise.all([
+        fetchJson<HistoryData>(`/api/predictions/history/${date}`),
+        fetchJson<CompareData>(`/api/predictions/compare/${date}`),
       ]);
-      setHistoryData(await histRes.json());
-      setCompareData(await cmpRes.json());
-    } catch { /* ignore */ } finally {
+      setHistoryData(hist);
+      setCompareData(cmp);
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to load prediction history');
+    } finally {
       setHistLoading(false);
     }
   };
@@ -1616,15 +1642,21 @@ function NextDayPredictions() {
   useEffect(() => {
     if (tab === 'live' && !data) loadPredictions();
     if (tab === 'history') {
-      fetch(`${API_BASE}/api/predictions/dates`).then(r => r.json()).then(d => {
+      fetchJson<{ dates: string[] }>('/api/predictions/dates').then(d => {
         setHistoryDates(d.dates || []);
         if (d.dates?.length && !historyDate) {
           setHistoryDate(d.dates[0]);
           loadHistory(d.dates[0]);
         }
-      }).catch(() => {});
-      fetch(`${API_BASE}/api/predictions/accuracy`).then(r => r.json()).then(setAccuracy).catch(() => {});
+      }).catch((e: any) => setError(e.message ?? 'Failed to load prediction dates'));
+      fetchJson<AccuracyData>('/api/predictions/accuracy').then(setAccuracy).catch((e: any) => setError(e.message ?? 'Failed to load prediction accuracy'));
     }
+    return () => {
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
   }, [tab]);
 
   // Derived filtered lists
@@ -1691,14 +1723,14 @@ function NextDayPredictions() {
       {tab === 'live' && (
         <>
           {/* Market closed notice */}
-          {data && !(data as any).marketDay && (
+          {data && data.marketDay === false && (
             <div className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 flex items-center gap-3">
               <MoonStar size={16} className="text-amber-400 shrink-0" />
               <div>
                 <p className="text-[11px] font-black text-amber-300">Market Closed — Weekend / Holiday</p>
                 <p className="text-[10px] text-white/40">
-                  {(data as any).lastTradingDay
-                    ? `Showing last trading session data (${new Date((data as any).lastTradingDay).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}). Prices are not updated.`
+                  {data.lastTradingDay
+                    ? `Showing last trading session data (${new Date(data.lastTradingDay).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })}). Prices are not updated.`
                     : 'These predictions are based on the last trading session. No new data will be saved until the next trading day.'}
                 </p>
               </div>
@@ -1712,7 +1744,7 @@ function NextDayPredictions() {
               <p className="text-[11px] text-white/40 font-bold uppercase tracking-[0.15em]">Running prediction engine...</p>
             </div>
           )}
-          {!loading && !error && data && (data as any).computing && (
+          {!loading && !error && data && data.computing && (
             <div className="flex flex-col items-center justify-center gap-4 py-16">
               <div className="relative">
                 <div className="w-14 h-14 rounded-full border-2 border-violet-500/20 animate-ping absolute inset-0" />
@@ -1721,7 +1753,7 @@ function NextDayPredictions() {
                 </div>
               </div>
               <p className="text-sm font-black uppercase tracking-[0.15em] text-white/60">Scanning full universe...</p>
-              <p className="text-[11px] text-white/25">{(data as any).message}</p>
+              <p className="text-[11px] text-white/25">{data.message}</p>
               <div className="flex gap-1.5">
                 {[0,1,2,3,4].map(i => (
                   <div key={i} className="w-1.5 h-1.5 rounded-full bg-violet-500/40 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
@@ -1736,7 +1768,7 @@ function NextDayPredictions() {
               <button onClick={() => loadPredictions()} className="rounded-xl bg-rose-500/10 border border-rose-500/20 px-4 py-1.5 text-xs font-black uppercase tracking-[0.15em] hover:bg-rose-500/20 transition">Retry</button>
             </div>
           )}
-          {!loading && !error && data && !(data as any).computing && (
+          {!loading && !error && data && !data.computing && (
             <>
               {/* Stats bar */}
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -1753,12 +1785,12 @@ function NextDayPredictions() {
                 ))}
               </div>
               {/* Data quality badge */}
-              {(data as any).realDataCount != null && (
+              {data.realDataCount != null && (
                 <div className="flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/[0.05] px-3 py-2">
                   <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse shrink-0" />
                   <p className="text-[10px] text-cyan-300 font-bold">
-                    {(data as any).realDataCount} stocks analysed with real OHLCV candles
-                    {(data as any).syntheticDataCount > 0 && <span className="text-white/30 font-normal"> · {(data as any).syntheticDataCount} synthetic fallback</span>}
+                    {data.realDataCount} stocks analysed with real OHLCV candles
+                    {(data.syntheticDataCount ?? 0) > 0 && <span className="text-white/30 font-normal"> · {data.syntheticDataCount} synthetic fallback</span>}
                   </p>
                 </div>
               )}
@@ -2184,7 +2216,7 @@ interface RankTrend {
 
 interface OutcomeRow {
   rank: number; symbol: string; sector: string; signal: string; confidence: string;
-  final_score: number; priceAtSnapshot: number; priceAtOutcome: number | null;
+  final_score: number; priceAtSnapshot: number | null; priceAtOutcome: number | null;
   pctChange: number | null; hit: boolean | null;
 }
 
@@ -2216,19 +2248,20 @@ function RankingsHistoryPanel() {
   const [horizon, setHorizon] = useState(5);
   const [outcomes, setOutcomes] = useState<OutcomeData | null>(null);
   const [outcomesLoading, setOutcomesLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   // Load available dates
   useEffect(() => {
     setDatesLoading(true);
-    fetch(`${API_BASE}/api/rankings/history/dates`)
-      .then(r => r.json())
+    setHistoryError(null);
+    fetchJson<{ dates: string[]; annotated: { date: string; isTrading: boolean }[] }>('/api/rankings/history/dates')
       .then(d => {
         const ds: string[] = d.dates || [];
         setDates(ds);
         setAnnotated(d.annotated || []);
         if (ds.length > 0) { setSelectedDate(ds[0]); }
       })
-      .catch(() => {})
+      .catch((e: any) => setHistoryError(e.message ?? 'Failed to load rankings history dates'))
       .finally(() => setDatesLoading(false));
   }, []);
 
@@ -2237,20 +2270,20 @@ function RankingsHistoryPanel() {
     if (!selectedDate) return;
     setLoading(true);
     setSnapshot(null);
-    fetch(`${API_BASE}/api/rankings/history/${selectedDate}`)
-      .then(r => r.json())
+    setHistoryError(null);
+    fetchJson<RankHistorySnapshot>(`/api/rankings/history/${selectedDate}`)
       .then(setSnapshot)
-      .catch(() => {})
+      .catch((e: any) => setHistoryError(e.message ?? 'Failed to load rankings snapshot'))
       .finally(() => setLoading(false));
   }, [selectedDate]);
 
   // Load compare snapshot
   useEffect(() => {
     if (!compareDate) { setCompareSnapshot(null); return; }
-    fetch(`${API_BASE}/api/rankings/history/${compareDate}`)
-      .then(r => r.json())
+    setHistoryError(null);
+    fetchJson<RankHistorySnapshot>(`/api/rankings/history/${compareDate}`)
       .then(setCompareSnapshot)
-      .catch(() => {});
+      .catch((e: any) => setHistoryError(e.message ?? 'Failed to load comparison snapshot'));
   }, [compareDate]);
 
   // Load outcomes when view is outcomes or when horizon/date changes while on outcomes view
@@ -2258,10 +2291,10 @@ function RankingsHistoryPanel() {
     if (view !== 'outcomes' || !selectedDate) return;
     setOutcomesLoading(true);
     setOutcomes(null);
-    fetch(`${API_BASE}/api/rankings/history/outcomes/${selectedDate}?horizon=${horizon}`)
-      .then(r => r.json())
+    setHistoryError(null);
+    fetchJson<OutcomeData>(`/api/rankings/history/outcomes/${selectedDate}?horizon=${horizon}`)
       .then(setOutcomes)
-      .catch(() => {})
+      .catch((e: any) => setHistoryError(e.message ?? 'Failed to load ranking outcomes'))
       .finally(() => setOutcomesLoading(false));
   }, [view, selectedDate, horizon]);
 
@@ -2269,10 +2302,10 @@ function RankingsHistoryPanel() {
     if (!sym) return;
     setTrendLoading(true);
     setTrend(null);
-    fetch(`${API_BASE}/api/rankings/history/trend/${sym.toUpperCase()}`)
-      .then(r => r.json())
+    setHistoryError(null);
+    fetchJson<RankTrend>(`/api/rankings/history/trend/${sym.toUpperCase()}`)
       .then(setTrend)
-      .catch(() => {})
+      .catch((e: any) => setHistoryError(e.message ?? 'Failed to load ranking trend'))
       .finally(() => setTrendLoading(false));
   };
 
@@ -2307,6 +2340,11 @@ function RankingsHistoryPanel() {
 
   return (
     <div className="space-y-4">
+      {historyError && (
+        <div className="rounded-xl border border-rose-500/20 bg-rose-500/[0.06] px-3 py-2 text-[10px] font-bold text-rose-300">
+          {historyError}
+        </div>
+      )}
 
       {/* ── Controls bar ── */}
       <div className="flex flex-wrap items-center gap-2">
@@ -2787,7 +2825,9 @@ function RankingsHistoryPanel() {
                           </td>
                           <td className="px-3 py-2"><SignalBadge signal={o.signal} /></td>
                           <td className="px-3 py-2 font-bold text-emerald-400">{Math.round(o.final_score * 100)}</td>
-                          <td className="px-3 py-2 font-mono text-white/60">₹{o.priceAtSnapshot.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                          <td className="px-3 py-2 font-mono text-white/60">
+                            {o.priceAtSnapshot !== null ? `₹${o.priceAtSnapshot.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
+                          </td>
                           <td className="px-3 py-2 font-mono text-white/60">
                             {o.priceAtOutcome !== null ? `₹${o.priceAtOutcome.toLocaleString('en-IN', { maximumFractionDigits: 0 })}` : '—'}
                           </td>
@@ -2830,20 +2870,26 @@ export default function AIStockIntelligenceTab() {
   const [activePanel, setActivePanel] = useState<PanelId>('rankings');
   const [lastUpdated, setLastUpdated] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const requestSeqRef = useRef(0);
 
   const load = useCallback(async (force = false) => {
+    const requestSeq = ++requestSeqRef.current;
     try {
       if (force) setRefreshing(true);
       const url = force ? '/api/ai-intelligence/refresh' : '/api/ai-intelligence/dashboard';
       const data = await fetchJson<Dashboard>(url, force ? { method: 'POST' } : undefined);
+      if (requestSeq !== requestSeqRef.current) return;
       setDashboard(data);
       setLastUpdated(new Date().toLocaleTimeString());
       setError(null);
     } catch (e: any) {
+      if (requestSeq !== requestSeqRef.current) return;
       setError(e.message ?? 'Failed to load AI Intelligence data');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestSeq === requestSeqRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
@@ -2907,7 +2953,7 @@ export default function AIStockIntelligenceTab() {
     <div className="space-y-3">
 
       {/* ── Market Closed Notice ── */}
-      {!(dashboard as any).marketDay && (
+      {dashboard.marketDay === false && (
         <div className="rounded-2xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3 flex items-center gap-3">
           <div className="w-7 h-7 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
             <MoonStar size={13} className="text-amber-400" />
@@ -2915,12 +2961,12 @@ export default function AIStockIntelligenceTab() {
           <div>
             <p className="text-[11px] font-black text-amber-300">Market Closed — Weekend / Holiday</p>
             <p className="text-[10px] text-white/40 leading-relaxed">
-              NSE/BSE is not trading today. Rankings and signals are based on the last trading session. Intraday price changes, volume spikes, and early rally signals are paused until market reopens.
+              NSE/BSE is not trading today. This view shows a model watchlist with live trading signals paused until market reopens.
             </p>
           </div>
         </div>
       )}
-      {(dashboard as any).marketDay && !(dashboard as any).marketOpen && (
+      {dashboard.marketDay && !dashboard.marketOpen && (
         <div className="rounded-2xl border border-blue-500/20 bg-blue-500/[0.06] px-4 py-3 flex items-center gap-3">
           <div className="w-7 h-7 rounded-full bg-blue-500/15 flex items-center justify-center shrink-0">
             <SunMedium size={13} className="text-blue-400" />
@@ -2998,7 +3044,7 @@ export default function AIStockIntelligenceTab() {
 
       {/* ── KPI Bar ── */}
       <KPIBar summary={dashboard.summary} computedAt={dashboard.computedAt} aiPowered={dashboard.aiPowered}
-        liveCount={dashboard.rankings?.filter((r: any) => r.priceSource === 'live').length} />
+        liveCount={dashboard.rankings?.filter(r => r.priceSource === 'live').length} />
 
       {/* ── Panel Tabs ── */}
       <div className="flex flex-wrap gap-1 rounded-2xl border border-white/5 bg-white/[0.03] p-1">
@@ -3036,8 +3082,8 @@ export default function AIStockIntelligenceTab() {
             <RankingsTable data={dashboard.rankings} />
           </div>
         )}
-        {activePanel === 'rally'    && <EarlyRallyPanel candidates={dashboard.earlyRallyCandidates} marketDay={(dashboard as any).marketDay} />}
-        {activePanel === 'alerts'   && <AlertsFeed alerts={dashboard.liveAlerts} marketDay={(dashboard as any).marketDay} />}
+        {activePanel === 'rally'    && <EarlyRallyPanel candidates={dashboard.earlyRallyCandidates} marketDay={dashboard.marketDay} />}
+        {activePanel === 'alerts'   && <AlertsFeed alerts={dashboard.liveAlerts} marketDay={dashboard.marketDay} />}
         {activePanel === 'news'     && <NewsFeedPanel news={dashboard.newsFeed} />}
         {activePanel === 'macro'    && <MacroPanel macro={dashboard.macroSnapshot} aiInsights={dashboard.aiInsights} />}
         {activePanel === 'sectors'  && <SectorStrengthPanel sectors={dashboard.sectorStrength} />}
